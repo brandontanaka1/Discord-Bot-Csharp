@@ -1,9 +1,9 @@
 ﻿{
 
 "version": "1.0",
-"token": "BOT_TOKEN_HERE",
+"token": "0a4878b2c96176d7630ba2b4714dbc9a2db0e8119e3cb05864c0ba734c0207a7",
 
-"prefixes": ["."],
+"prefixes": [".", "$"],
 "join_message": "Hello, I'm Discord Bot! :heart:",
 
 "currently": "playing|listening|watching|streaming",
