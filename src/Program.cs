@@ -5,6 +5,7 @@ using Discord.WebSocket;
 using Discord.Commands;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
+using Discord.Interactions;
 
 namespace Discord_Bot
 {
@@ -22,6 +23,7 @@ namespace Discord_Bot
 
             client.Log += Log;
             services.GetRequiredService<CommandService>().Log += Log;
+            services.GetRequiredService<InteractionService>().Log += Log;
 
             // Get the bot token from the Config.json file.
             JObject config = Functions.GetConfig();
@@ -32,6 +34,7 @@ namespace Discord_Bot
             await client.StartAsync();
 
             await services.GetRequiredService<CommandHandlingService>().InitializeAsync();
+            await services.GetRequiredService<InteractionHandlingService>().InitializeAsync();
 
             // Run the bot forever.
             await Task.Delay(-1);
@@ -39,19 +42,27 @@ namespace Discord_Bot
 
         public ServiceProvider ConfigureServices()
         {
+            var client = new DiscordSocketClient(new DiscordSocketConfig
+            {
+                MessageCacheSize = 500,
+                LogLevel = LogSeverity.Info
+            });
+
             return new ServiceCollection()
-                .AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
-                { 
-                    MessageCacheSize = 500,
-                    LogLevel = LogSeverity.Info
-                }))
+                .AddSingleton(client)
                 .AddSingleton(new CommandService(new CommandServiceConfig
                 { 
                     LogLevel = LogSeverity.Info,
-                    DefaultRunMode = RunMode.Async,
+                    DefaultRunMode = Discord.Commands.RunMode.Async,
                     CaseSensitiveCommands = false 
                 }))
+                .AddSingleton(new InteractionService(client, new InteractionServiceConfig
+                {
+                    LogLevel = LogSeverity.Info,
+                    DefaultRunMode = Discord.Interactions.RunMode.Async
+                }))
                 .AddSingleton<CommandHandlingService>()
+                .AddSingleton<InteractionHandlingService>()
                 .BuildServiceProvider();
         }
 

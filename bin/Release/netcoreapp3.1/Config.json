@@ -1,0 +1,13 @@
+﻿{
+
+"version": "1.0",
+"token": "OTgyMTIxNTQxODMzNzQ0NDA2.GPhRGB.GNG3YcfpTB9oTYHSXeeKMnRcvWee8rY57YjevA",
+
+"prefixes": [".", "$"],
+"join_message": "Hello, I'm Discord Bot! :heart:",
+
+"currently": "playing|listening|watching|streaming",
+"playing_status": "Send me your D2R runs!",
+"status": "online|dnd|idle|offline"
+
+}
