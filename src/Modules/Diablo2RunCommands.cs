@@ -93,7 +93,7 @@ namespace Discord_Bot_Csharp.src.Modules
             try
             {
                 var split = message.Split(" ");
-                var runType = new RunType() { Name = split[0].Trim(), Value = split[1].Trim(), Channel = long.Parse(split[2].Trim()) };
+                var runType = new RunType() { Name = split[0].Trim(), Value = split[1].Trim(), Channel = ulong.Parse(split[2].Trim()) };
                 var runTypeController = new BaseDataController<RunType>(ConnectionString);
                 await runTypeController.GetCollection().InsertOneAsync(runType);
             }
