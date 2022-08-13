@@ -5,6 +5,7 @@ using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -26,10 +27,6 @@ namespace Discord_Bot
         {
             public string Title => "Game Information";
 
-            [InputLabel("Run Type")]
-            [ModalTextInput("run_type", placeholder: "baal or chaos (contact me to add other types here)")]
-            public string RunType { get; set; }
-
             // Strings with the ModalTextInput attribute will automatically become components.
             [InputLabel("Game Name")]
             [ModalTextInput("game_name", placeholder: "run1")]
@@ -46,13 +43,12 @@ namespace Discord_Bot
         public async Task ModalResponse(GameInfoModal modal)
         {
             // Build the message to send.
-            string message = $"Type: {modal.RunType}\nGame Name: {modal.Name}\nGame Password: {modal.Password}";
+            string message = $"Game Name: {modal.Name}\nGame Password: {modal.Password}";
 
             var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
             var runner = await runnerController.GetQuery().Where(runner => runner.Name == Context.User.Username).FirstOrDefaultAsync();
             var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
             var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
-            game.RunType = modal.RunType;
             game.GameName = modal.Name;
             game.GamePassword = modal.Password.Trim();
 
@@ -71,9 +67,10 @@ namespace Discord_Bot
 
             // Respond to the modal.
             await RespondAsync(message, allowedMentions: mentions, ephemeral: true, components: component.Build());
+            await NotifyChannelOfNewRun(runner, game);
         }
 
-        [ComponentInteraction("platform:*")]
+        [ComponentInteraction("platform")]
         public async Task HandlePlatformSelected(string platformCode)
         {
             var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
@@ -81,36 +78,122 @@ namespace Discord_Bot
 
             if (runner.CurrentGame != null)
             {
-                await Context.Interaction.RespondAsync($"Already tracking runs. If this is a new session, please end your previous session by clicking the 'Stop Tracking' button.", ephemeral: true);
-                return;
+                await StopRunning(runner);
             }
+
+            var component = new Discord.ComponentBuilder();
+
+            var menuOptionsBuilder = new List<SelectMenuOptionBuilder>();
+            var list = new List<string>()
+            {
+                "Americas",
+                "Europe",
+                "Asia"
+            };
+
+            foreach (string value in list)
+            {
+                var selectMenuOptionBuilder = new SelectMenuOptionBuilder(value, value);
+                menuOptionsBuilder.Add(selectMenuOptionBuilder);
+            }
+
+            var selectMenuBuilder = new SelectMenuBuilder("regionselected", menuOptionsBuilder);
+            component = component.WithSelectMenu(selectMenuBuilder);
 
             var newGame = new Diablo2Game() { Platform = GetPlatform(platformCode), GameType = GetGameType(platformCode) };
             var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
             await gameController.GetCollection().InsertOneAsync(newGame);
-            runner.CurrentGame = newGame.Id;
-            var filter = Builders<Diablo2Runner>.Filter.Eq(runner => runner.Name, Context.User.Username);
-            await runnerController.GetCollection().ReplaceOneAsync(filter, runner);
+
+            AllowedMentions mentions = new AllowedMentions()
+            {
+                AllowedTypes = AllowedMentionTypes.Users
+            };
+
+            await Context.Interaction.RespondAsync($"Please select your region by making a selection below.", components: component.Build(), allowedMentions: mentions, ephemeral: true);
+        }
+
+        [ComponentInteraction("regionselected")]
+        public async Task HandleRegionSelected(string region)
+        {
+            var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
+            var runner = await runnerController.GetQuery().Where(runner => runner.Name == Context.User.Username).FirstOrDefaultAsync();
+            var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
+            var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
+            game.Region = region;
+            var filter = Builders<Diablo2Game>.Filter.Eq(game => game.Id, runner.CurrentGame.Value);
+            await gameController.GetCollection().ReplaceOneAsync(filter, game);
+
+            var component = new Discord.ComponentBuilder();
+
+            var menuOptionsBuilder = new List<SelectMenuOptionBuilder>();
+            var runTypeController = new BaseDataController<RunType>(ConnectionString);
+            var runTypes = await runTypeController.GetQuery().ToListAsync();
+
+            foreach (var runType in runTypes)
+            {
+                var selectMenuOptionBuilder = new SelectMenuOptionBuilder(runType.Name, runType.Value);
+                menuOptionsBuilder.Add(selectMenuOptionBuilder);
+            }
+
+            var selectMenuBuilder = new SelectMenuBuilder("runtypeselected", menuOptionsBuilder);
+            component = component.WithSelectMenu(selectMenuBuilder);
 
             await Context.Interaction.RespondWithModalAsync<GameInfoModal>("game_info");
+        }
+
+        [ComponentInteraction("runtypeselected")]
+        public async Task HandleRunTypeSelected(string runtype)
+        {
+            var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
+            var runner = await runnerController.GetQuery().Where(runner => runner.Name == Context.User.Username).FirstOrDefaultAsync();
+            var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
+            var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
+            game.RunType = runtype;
+            var filter = Builders<Diablo2Game>.Filter.Eq(game => game.Id, runner.CurrentGame.Value);
+            await gameController.GetCollection().ReplaceOneAsync(filter, game);
+
+            await Context.Interaction.RespondWithModalAsync<GameInfoModal>("game_info");
+        }
+
+        private async Task NotifyChannelOfNewRun(Diablo2Runner runner, Diablo2Game game)
+        {
+            string message = $"**{runner.Name}** has started a new run!\n**Platform:** {game.Platform}\n**Region:** {game.Region}\n**Game Type:** {game.GameType}\n**Game Name:** {game.GameName}\n**Game Password:** {game.GamePassword}";
+            var runTypeController = new BaseDataController<RunType>(ConnectionString);
+            var runType = await runTypeController.GetQuery().Where(run => run.Value == game.RunType).FirstOrDefaultAsync();
+
+            await Context.Guild.GetTextChannel(runType.Channel).SendMessageAsync(message);
+            //if (string.Equals(game.RunType, "chaos", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    await Context.Guild.GetTextChannel(991333288063012965).SendMessageAsync(message);
+            //}
+            //else if (string.Equals(game.RunType, "cow", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    await Context.Guild.GetTextChannel(992077941431357541).SendMessageAsync(message);
+            //}
+            //else if (string.Equals(game.RunType, "split-mf", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    await Context.Guild.GetTextChannel(992077800293019698).SendMessageAsync(message);
+            //}
+            //else
+            //{
+            //    await Context.Guild.GetTextChannel(991333314109653102).SendMessageAsync(message);
+            //}
         }
 
         [ComponentInteraction("runinteraction:*")]
         public async Task HandleRunInteraction(string interaction)
         {
-            // need to update stats here
             var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
             var runner = await runnerController.GetQuery().Where(runner => runner.Name == Context.User.Username).FirstOrDefaultAsync();
-            var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
-            var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
-            var updateStatsTask = UpdateStats(game);
 
             if (string.Equals(interaction, "next", StringComparison.OrdinalIgnoreCase))
-            {               
-                var runNumber = Convert.ToInt32(Regex.Replace(game.GameName, "[^0-9]", ""));
+            {
+                var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
+                var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
+                var updateStatsTask = UpdateStats(game);
                 var runName = Regex.Replace(game.GameName, "[0-9]", "");
 
-                game.GameName = $"{runName}{runNumber + 1}";
+                game.GameName = $"{runName}{GetNextRunNumber(game.GameName)}";
 
                 var filter = Builders<Diablo2Game>.Filter.Eq(game => game.Id, runner.CurrentGame.Value);
                 await gameController.GetCollection().ReplaceOneAsync(filter, game);
@@ -126,22 +209,46 @@ namespace Discord_Bot
                 component = component.WithButton("Stop Tracking", style: ButtonStyle.Primary, customId: "runinteraction:stop");
                 string message = $"Type: {game.RunType}\nGame Name: {game.GameName}\nGame Password: {game.GamePassword}";
 
+                await updateStatsTask;
+
                 // Respond to the modal.
                 await RespondAsync(message, allowedMentions: mentions, ephemeral: true, components: component.Build());
+                await NotifyChannelOfNewRun(runner, game);
             }
             else
             {
-                var gameFilter = Builders<Diablo2Game>.Filter.Eq(game => game.Id, runner.CurrentGame.Value);
-                var deleteTask = gameController.GetCollection().DeleteOneAsync(gameFilter);
-                runner.CurrentGame = null;
-                var filter = Builders<Diablo2Runner>.Filter.Eq(runner => runner.Name, Context.User.Username);
-                await runnerController.GetCollection().ReplaceOneAsync(filter, runner);
-                await deleteTask;
-
+                // run count is increment in StopRunning
+                await StopRunning(runner);
                 await Context.Interaction.RespondAsync($"Run tracking session has ended. Thank you!", ephemeral: true);
             }
+        }
 
-            await updateStatsTask;
+        private string GetNextRunNumber(string input)
+        {
+            var number = Regex.Replace(input, "[^0-9]", "");
+            var runNumber = string.IsNullOrWhiteSpace(number) ? 0 : Convert.ToInt32(number);
+            var count = number.TakeWhile(c => c == '0').Count();
+
+            return runNumber.ToString("D" + count);
+        }
+
+        private async Task StopRunning(Diablo2Runner runner)
+        {
+            if (!runner.CurrentGame.HasValue)
+            {
+                return;
+            }
+
+            var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
+            var runnerController = new BaseDataController<Diablo2Runner>(ConnectionString);
+            var game = gameController.GetQuery().Where(game => game.Id == runner.CurrentGame.Value).FirstOrDefault();
+            await UpdateStats(game);
+            var gameFilter = Builders<Diablo2Game>.Filter.Eq(game => game.Id, runner.CurrentGame.Value);
+            var deleteTask = gameController.GetCollection().DeleteOneAsync(gameFilter);
+            runner.CurrentGame = null;
+            var filter = Builders<Diablo2Runner>.Filter.Eq(runner => runner.Name, Context.User.Username);
+            await runnerController.GetCollection().ReplaceOneAsync(filter, runner);
+            await deleteTask;
         }
 
         private async Task UpdateStats(Diablo2Game game)
@@ -150,7 +257,8 @@ namespace Discord_Bot
             var stats = await statsController.GetQuery().Where(stats => stats.RunnerName == Context.User.Username 
                                                                          && stats.Platform == game.Platform
                                                                          && stats.GameType == game.GameType
-                                                                         && stats.RunType == game.RunType).FirstOrDefaultAsync();
+                                                                         && stats.RunType == game.RunType
+                                                                         && stats.Region == game.Region).FirstOrDefaultAsync();
 
             if (stats == null)
             {
@@ -160,6 +268,7 @@ namespace Discord_Bot
                     Platform = game.Platform,
                     GameType = game.GameType,
                     RunType = game.RunType,
+                    Region = game.Region,
                     RunCount = 1
                 };
 
@@ -177,25 +286,36 @@ namespace Discord_Bot
         public async Task StartTracking()
         {
             var component = new Discord.ComponentBuilder();
-            component = component.WithButton("Hardcore (Non-Ladder) Nintendo Switch", style: ButtonStyle.Danger, customId: "platform:HCNS");
-            component = component.WithButton("Hardcore (Ladder) Nintendo Switch", style: ButtonStyle.Danger, customId: "platform:HCLNS");
-            component = component.WithButton("Standard (Non-Ladder) Nintendo Switch", style: ButtonStyle.Danger, customId: "platform:SNS");
-            component = component.WithButton("Standard (Ladder) Nintendo Switch", style: ButtonStyle.Danger, customId: "platform:SLNS");
 
-            component = component.WithButton("Hardcore (Non-Ladder) Playstation", style: ButtonStyle.Primary, customId: "platform:HCPS");
-            component = component.WithButton("Hardcore (Ladder) Playstation", style: ButtonStyle.Primary, customId: "platform:HCLPS");
-            component = component.WithButton("Standard (Non-Ladder) Playstation", style: ButtonStyle.Primary, customId: "platform:SPS");
-            component = component.WithButton("Standard (Ladder) Playstation", style: ButtonStyle.Primary, customId: "platform:SLPS");
+            var menuOptionsBuilder = new List<SelectMenuOptionBuilder>();
+            var list = new List<string>()
+            {
+                "HCBNET",
+                "HCLBNET",
+                "SBNET",
+                "SLBNET",
+                "HCNS",
+                "HCLNS",
+                "SNS",
+                "SLNS",
+                "HCPS",
+                "HCLPS",
+                "SPS",
+                "SLPS",
+                "HCXBX",
+                "HCLXBX",
+                "SXBX",
+                "SLXBX"
+            };
 
-            component = component.WithButton("Hardcore (Non-Ladder) Xbox", style: ButtonStyle.Success, customId: "platform:HCXBX");
-            component = component.WithButton("Hardcore (Ladder) Xbox", style: ButtonStyle.Success, customId: "platform:HCLXBX");
-            component = component.WithButton("Standard (Non-Ladder) Xbox", style: ButtonStyle.Success, customId: "platform:SXBX");
-            component = component.WithButton("Standard (Ladder) Xbox", style: ButtonStyle.Success, customId: "platform:SLXBX");
+            foreach (string value in list)
+            {
+                var selectMenuOptionBuilder = new SelectMenuOptionBuilder($"{GetGameType(value)} {GetPlatform(value)}", value);
+                menuOptionsBuilder.Add(selectMenuOptionBuilder);
+            }
 
-            component = component.WithButton("Hardcore (Non-Ladder) Battle.net", style: ButtonStyle.Secondary, customId: "platform:HCBNET");
-            component = component.WithButton("Hardcore (Ladder) Battle.net", style: ButtonStyle.Secondary, customId: "platform:HCLBNET");
-            component = component.WithButton("Standard (Non-Ladder) Battle.net", style: ButtonStyle.Secondary, customId: "platform:SBNET");
-            component = component.WithButton("Standard (Ladder) Battle.net", style: ButtonStyle.Secondary, customId: "platform:SLBNET");
+            var selectMenuBuilder = new SelectMenuBuilder("platform", menuOptionsBuilder);
+            component = component.WithSelectMenu(selectMenuBuilder);
 
             var databaseController = new BaseDataController<Diablo2Runner>(ConnectionString);
             var runner = await databaseController.GetQuery().Where(runner => runner.Name == Context.User.Username).FirstOrDefaultAsync();
@@ -208,8 +328,7 @@ namespace Discord_Bot
 
             if (runner.CurrentGame != null)
             {
-                await Context.Interaction.RespondAsync($"Already tracking runs. If this is a new session, please end your previous session by clicking the 'Stop Tracking' button.", ephemeral: true);
-                return;
+                await StopRunning(runner);
             }
 
             AllowedMentions mentions = new AllowedMentions()
@@ -218,7 +337,7 @@ namespace Discord_Bot
                 MentionRepliedUser = true
             };
 
-            await Context.Interaction.RespondAsync($"Starting to track runs for **{Context.User.Username}**! Please select your platform by clicking a button below.", components: component.Build(), allowedMentions: mentions, ephemeral: true);
+            await Context.Interaction.RespondAsync($"Starting to track runs for **{Context.User.Username}**! Please select your platform by making a selection below.", components: component.Build(), allowedMentions: mentions, ephemeral: true);
         }
 
         private string GetGameType(string platformCode)
@@ -247,7 +366,7 @@ namespace Discord_Bot
         {
             if (platformCode.EndsWith("BNET"))
             {
-                return "Battle.Net";
+                return "PC";
             }
             else if (platformCode.EndsWith("XBX"))
             {
