@@ -104,6 +104,10 @@ namespace Discord_Bot
             var gameController = new BaseDataController<Diablo2Game>(ConnectionString);
             await gameController.GetCollection().InsertOneAsync(newGame);
 
+            runner.CurrentGame = newGame.Id;
+            var filter = Builders<Diablo2Runner>.Filter.Eq(runner => runner.Name, Context.User.Username);
+            await runnerController.GetCollection().ReplaceOneAsync(filter, runner);
+
             AllowedMentions mentions = new AllowedMentions()
             {
                 AllowedTypes = AllowedMentionTypes.Users
@@ -138,7 +142,12 @@ namespace Discord_Bot
             var selectMenuBuilder = new SelectMenuBuilder("runtypeselected", menuOptionsBuilder);
             component = component.WithSelectMenu(selectMenuBuilder);
 
-            await Context.Interaction.RespondWithModalAsync<GameInfoModal>("game_info");
+            AllowedMentions mentions = new AllowedMentions()
+            {
+                AllowedTypes = AllowedMentionTypes.Users
+            };
+
+            await Context.Interaction.RespondAsync($"Please select the run type by making a selection below.", components: component.Build(), allowedMentions: mentions, ephemeral: true);
         }
 
         [ComponentInteraction("runtypeselected")]
@@ -162,22 +171,6 @@ namespace Discord_Bot
             var runType = await runTypeController.GetQuery().Where(run => run.Value == game.RunType).FirstOrDefaultAsync();
 
             await Context.Guild.GetTextChannel(runType.Channel).SendMessageAsync(message);
-            //if (string.Equals(game.RunType, "chaos", StringComparison.OrdinalIgnoreCase))
-            //{
-            //    await Context.Guild.GetTextChannel(991333288063012965).SendMessageAsync(message);
-            //}
-            //else if (string.Equals(game.RunType, "cow", StringComparison.OrdinalIgnoreCase))
-            //{
-            //    await Context.Guild.GetTextChannel(992077941431357541).SendMessageAsync(message);
-            //}
-            //else if (string.Equals(game.RunType, "split-mf", StringComparison.OrdinalIgnoreCase))
-            //{
-            //    await Context.Guild.GetTextChannel(992077800293019698).SendMessageAsync(message);
-            //}
-            //else
-            //{
-            //    await Context.Guild.GetTextChannel(991333314109653102).SendMessageAsync(message);
-            //}
         }
 
         [ComponentInteraction("runinteraction:*")]
@@ -228,6 +221,7 @@ namespace Discord_Bot
             var number = Regex.Replace(input, "[^0-9]", "");
             var runNumber = string.IsNullOrWhiteSpace(number) ? 0 : Convert.ToInt32(number);
             var count = number.TakeWhile(c => c == '0').Count();
+            runNumber = runNumber + 1;
 
             return runNumber.ToString("D" + count);
         }
