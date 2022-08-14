@@ -62,26 +62,33 @@ namespace Discord_Bot_Csharp.src.Modules
         [Discord.Commands.Summary("Display leaderboards")]
         public async Task DisplayLeaderboards([Remainder] string message = "")
         {
+            var runTypeController = new BaseDataController<RunType>(ConnectionString);
+            var runTypes = await runTypeController.GetQuery().ToListAsync();
             var statsController = new BaseDataController<Diablo2RunnerStats>(ConnectionString);
-            var statsTask = statsController.GetQuery().GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
-            var chaosStatsTask = statsController.GetQuery().Where(stat => stat.RunType == "chaos").GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
-            var baalStatsTask = statsController.GetQuery().Where(stat => stat.RunType == "baal").GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
-            var splitMfStatsTask = statsController.GetQuery().Where(stat => stat.RunType == "split-mf").GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
-            var cowStatsTask = statsController.GetQuery().Where(stat => stat.RunType == "cow").GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
+            var statsTask = statsController.GetQuery().GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Name = "Overall", Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync();
+            var statsTasks = new List<Task<List<LeaderboardDto>>>();
 
-            var stats = await statsTask;
-            var chaosStats = await chaosStatsTask;
-            var baalStats = await baalStatsTask;
-            var splitMfStats = await splitMfStatsTask;
-            var cowStats = await cowStatsTask;
+            foreach (var runType in runTypes)
+            {
+                statsTasks.Add(statsController.GetQuery().Where(stat => stat.RunType == runType.Value).GroupBy(stats => stats.RunnerName).Select(x => new LeaderboardDto { Name = runType.Name, Key = x.Key, Total = x.Sum(y => y.RunCount) }).OrderByDescending(x => x.Total).Take(5).ToListAsync());
+            }
+
             var embed = new EmbedBuilder();
-            embed.WithDescription("**Top 5 runners per type**");
-            embed.WithTitle("The Throne Room Leaderboards");
+            embed.WithDescription("**Top 5 runners per run type**");
+            embed.WithTitle("Leaderboards");
+            var stats = await statsTask;
             BuildTop5List(embed, "Overall", stats);
-            BuildTop5List(embed, "Chaos", chaosStats);
-            BuildTop5List(embed, "Baal", baalStats);
-            BuildTop5List(embed, "Split MF", splitMfStats);
-            BuildTop5List(embed, "Cow", cowStats);
+
+            foreach (var task in statsTasks)
+            {
+                var dto = await task;
+                var firstDto = dto.FirstOrDefault();
+
+                if (firstDto != null)
+                {
+                    BuildTop5List(embed, firstDto.Name, dto);
+                }
+            }
 
             await Context.Channel.SendMessageAsync("", false, embed.Build());
         }
@@ -142,6 +149,8 @@ namespace Discord_Bot_Csharp.src.Modules
 
     public class LeaderboardDto
     {
+        public string Name { get; set; }
+
         public string Key { get; set; }
 
         public long Total { get; set; }
