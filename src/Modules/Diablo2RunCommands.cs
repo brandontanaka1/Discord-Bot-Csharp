@@ -93,6 +93,36 @@ namespace Discord_Bot_Csharp.src.Modules
             await Context.Channel.SendMessageAsync("", false, embed.Build());
         }
 
+        [Command("fixruntypes")]
+        [Discord.Commands.Summary("Fix Run Types")]
+        [Discord.Commands.RequireOwner]
+        public async Task FixRunTypes([Remainder] string message = "")
+        {
+            try
+            {
+                var runTypeController = new BaseDataController<RunType>(ConnectionString);
+                var runTypes = await runTypeController.GetQuery().ToListAsync();
+
+                foreach (var runType in runTypes)
+                {
+                    var runTypeChannel = new RunTypeChannel() { Channel = runType.Channel, Guild = Context.Guild.Id };
+
+                    if (runType.Channels == null)
+                    {
+                        runType.Channels = new List<RunTypeChannel>();
+                    }
+
+                    runType.Channels.Add(runTypeChannel);
+                    var filter = Builders<RunType>.Filter.Eq(rt => rt.Id, runType.Id);
+                    await runTypeController.GetCollection().ReplaceOneAsync(filter, runType);
+                }
+            }
+            catch (Exception)
+            {
+                await ReplyAsync("Error encountered running command. Command must be in format:\n$fixruntypes");
+            }
+        }
+
         [Command("addruntype")]
         [Discord.Commands.Summary("Add Run Type")]
         public async Task AddRunType([Remainder] string message = "")
@@ -100,9 +130,38 @@ namespace Discord_Bot_Csharp.src.Modules
             try
             {
                 var split = message.Split(" ");
-                var runType = new RunType() { Name = split[0].Trim(), Value = split[1].Trim(), Channel = ulong.Parse(split[2].Trim()) };
+                var runType = new RunType() { Name = split[0].Trim(), Value = split[1].Trim()};
                 var runTypeController = new BaseDataController<RunType>(ConnectionString);
-                await runTypeController.GetCollection().InsertOneAsync(runType);
+                var existing = await runTypeController.GetQuery().Where(r => r.Value == runType.Value).FirstOrDefaultAsync();
+                var runTypeChannel = new RunTypeChannel() { Channel = Context.Channel.Id, Guild = Context.Guild.Id };
+
+                if (existing != null)
+                {
+                    existing.Name = runType.Name;
+                    
+                    if (existing.Channels == null)
+                    {
+                        existing.Channels = new List<RunTypeChannel>();
+                    }
+
+                    if (!existing.Channels.Any(c => c.Channel == runTypeChannel.Channel && c.Guild == runTypeChannel.Guild))
+                    {
+                        existing.Channels.Add(runTypeChannel);
+                    }
+                    
+                    var filter = Builders<RunType>.Filter.Eq(rt => rt.Id, existing.Id);
+                    await runTypeController.GetCollection().ReplaceOneAsync(filter, existing);
+                }
+                else
+                {
+                    if (runType.Channels == null)
+                    {
+                        runType.Channels = new List<RunTypeChannel>();
+                    }
+
+                    runType.Channels.Add(runTypeChannel);
+                    await runTypeController.GetCollection().InsertOneAsync(runType);
+                }
             }
             catch (Exception)
             {

@@ -1,5 +1,6 @@
 ﻿using Discord;
 using Discord.Interactions;
+using Discord.WebSocket;
 using Discord_Bot_Csharp.src.Data_Access;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
@@ -170,7 +171,14 @@ namespace Discord_Bot
             var runTypeController = new BaseDataController<RunType>(ConnectionString);
             var runType = await runTypeController.GetQuery().Where(run => run.Value == game.RunType).FirstOrDefaultAsync();
 
-            await Context.Guild.GetTextChannel(runType.Channel).SendMessageAsync(message);
+            if (runType.Channels != null)
+            {
+                foreach (var channel in runType.Channels)
+                {
+                    var guild = Context.Client.GetGuild(channel.Guild);
+                    await guild.GetTextChannel(channel.Channel).SendMessageAsync(message);
+                }          
+            }           
         }
 
         [ComponentInteraction("runinteraction:*")]
