@@ -18,5 +18,7 @@ namespace Discord_Bot_Csharp.src.Data_Access
         public string GameName { get; set; }
 
         public string GamePassword { get; set; }
+
+        public string Region { get; set; }
     }
 }

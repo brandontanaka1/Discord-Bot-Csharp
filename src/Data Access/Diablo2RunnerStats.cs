@@ -17,6 +17,8 @@ namespace Discord_Bot_Csharp.src.Data_Access
 
         public string RunnerName { get; set; }
 
+        public string Region { get; set; }
+
         public int RunCount { get; set; }
     }
 }
