@@ -173,12 +173,10 @@ namespace Discord_Bot
 
             if (runType.Channels != null)
             {
-                DiscordSocketClient client = new DiscordSocketClient();
-
                 foreach (var channel in runType.Channels)
                 {
-                    var guild = client.GetGuild(channel.Guild);
-                    await guild.GetTextChannel(runType.Channel).SendMessageAsync(message);
+                    var guild = Context.Client.GetGuild(channel.Guild);
+                    await guild.GetTextChannel(channel.Channel).SendMessageAsync(message);
                 }          
             }           
         }
